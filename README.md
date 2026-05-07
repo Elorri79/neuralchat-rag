@@ -2,6 +2,8 @@
 
 Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama** como LLM local y **ChromaDB** como base de datos vectorial.
 
+![NeuralChat RAG](img/Captura%20de%20pantalla%202026-05-07%20a%20las%2014.19.52.png)
+
 ## Características
 
 - **Chat en streaming** — respuestas en tiempo real con efecto de "tecleado"

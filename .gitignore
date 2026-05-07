@@ -1,3 +1,6 @@
+# Capturas locales
+img/
+
 # Archivos del agente / sesión
 AGENTS.md
 *.session

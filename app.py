@@ -25,8 +25,17 @@ TEMPLATE = """<!DOCTYPE html>
     --txt:#e6edf3; --muted:#8b949e;
     --purple:#c77dff; --orange:#ff9f43; --cyan:#39c5bb; --pink:#f778ba;
   }
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-direction:column}
+* { box-sizing: border-box; margin: 0; padding: 0 }
+  html, body { height: 100dvh; overflow: hidden }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--txt);
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 
   header{
     background:linear-gradient(135deg,#0d1117 0%,#1a2332 50%,#0d1117 100%);
@@ -65,18 +74,37 @@ TEMPLATE = """<!DOCTYPE html>
   .kpi.cyan .kpi-value{color:var(--cyan)}
   .kpi.purple .kpi-value{color:var(--purple)}
 
+  /* ── Responsive ─────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .kpi-bar { grid-template-columns: repeat(3, 1fr) !important; padding: 12px 16px !important; gap: 8px !important; }
+    .kpi { padding: 10px 12px !important; }
+    header { padding: 14px 16px !important; }
+    .input-bar { padding: 12px 16px !important; }
+    .sidebar { display: none !important; }          /* hide charts on small screens */
+    .main-layout { display: block !important; }
+    .chat-header { padding: 10px 16px !important; }
+    #chat { padding: 16px !important; }
+    footer { padding: 8px !important; font-size: .65rem !important; }
+  }
+  @media (max-width: 540px) {
+    .kpi-bar { grid-template-columns: repeat(2, 1fr) !important; }
+    .kpi-icon { display: none !important; }
+    .msg { max-width: 90% !important; }
+  }
+
   .main-layout{display:flex;flex:1;overflow:hidden;min-height:0}
 
   /* Charts sidebar */
   .sidebar{
     width:280px;flex-shrink:0;border-right:1px solid var(--border);
-    padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;
+    padding:16px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;
   }
-  .sidebar h3{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+  .sidebar h3{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
   .chart-card{
-    background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px;
   }
-  .chart-card canvas{width:100%!important;height:140px!important}
+  .chart-card .chart-label{font-size:.7rem;color:var(--muted);margin-bottom:4px}
+  .chart-card canvas{width:100%!important;max-height:80px}
 
   /* RAG Panel */
   .rag-panel{
@@ -104,7 +132,7 @@ TEMPLATE = """<!DOCTYPE html>
   .rag-dot{width:8px;height:8px;border-radius:50%;background:var(--purple);display:none}
   .rag-dot.active{display:inline-block}
 
-  #chat{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:14px}
+  #chat{flex:1;overflow-y:auto;padding:16px 24px 100px 24px;display:flex;flex-direction:column;gap:14px}
   .msg{max-width:75%;padding:12px 16px;border-radius:14px;font-size:.92rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
   .msg.user{align-self:flex-end;background:linear-gradient(135deg,#1a3a5c,#0d2744);border:1px solid rgba(88,166,255,.3);color:var(--txt);border-bottom-right-radius:4px}
   .msg.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--border);color:var(--txt);border-bottom-left-radius:4px}
@@ -125,8 +153,10 @@ TEMPLATE = """<!DOCTYPE html>
 
   /* Input bar */
   .input-bar{
-    padding:16px 24px;border-top:1px solid var(--border);
-    display:flex;gap:12px;align-items:flex-end;flex-shrink:0;background:var(--surface);
+    position:fixed;bottom:32px;left:0;right:0;
+    padding:12px 24px;border-top:1px solid var(--border);
+    display:flex;gap:12px;align-items:flex-end;flex-shrink:0;
+    background:var(--surface);z-index:10;
   }
   #input{
     flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;
@@ -145,7 +175,7 @@ TEMPLATE = """<!DOCTYPE html>
   .btn-clear{background:var(--surface);border:1px solid var(--border);color:var(--muted);font-size:.8rem;padding:0 14px}
   .btn-rag{background:rgba(199,125,255,.2);border:1px solid rgba(199,125,255,.4);color:var(--purple)}
 
-  footer{text-align:center;padding:12px;color:var(--muted);font-size:.72rem;border-top:1px solid var(--border);flex-shrink:0}
+  footer{position:fixed;bottom:0;left:0;right:0;text-align:center;padding:8px 16px;color:var(--muted);font-size:.65rem;background:var(--bg);border-top:1px solid var(--border);z-index:10}
 
   /* Modal overlay */
   .modal-overlay{
@@ -233,16 +263,12 @@ TEMPLATE = """<!DOCTYPE html>
   <div class="sidebar">
     <h3>📈 Actividad del modelo</h3>
     <div class="chart-card">
-      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Distribución de tokens</div>
-      <canvas id="chartTokens" height="120"></canvas>
+      <div class="chart-label">Tokens por mensaje</div>
+      <div style="height:80px;position:relative"><canvas id="chartTokens"></canvas></div>
     </div>
     <div class="chart-card">
-      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Longitud de mensajes</div>
-      <canvas id="chartLength" height="120"></canvas>
-    </div>
-    <div class="chart-card">
-      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Tiempo de respuesta</div>
-      <canvas id="chartTime" height="120"></canvas>
+      <div class="chart-label">Tiempo resp. (s)</div>
+      <div style="height:80px;position:relative"><canvas id="chartTime"></canvas></div>
     </div>
 
     <!-- RAG panel -->

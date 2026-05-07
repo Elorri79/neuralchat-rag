@@ -47,33 +47,45 @@ const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#c77dff','#ff9f43','#39
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = 'rgba(48,54,61,.8)';
 
-function makeChart(id, labels, data) {
+function makeChart(id, labels, data, maxBars=8) {
   return new Chart(document.getElementById(id), {
-    type: 'doughnut',
+    type: 'bar',
     data: {
       labels: labels,
-      datasets: [{ data, backgroundColor: COLORS.slice(0, data.length), borderWidth: 0 }]
+      datasets: [{ data, backgroundColor: COLORS.slice(0, data.length), borderWidth: 0, borderRadius: 4 }]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'right', labels: { boxWidth: 10, padding: 6, font:{size:10} } } },
-      animation: { duration: 600 }
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      animation: { duration: 400 },
+      scales: {
+        x: { grid: { color: 'rgba(48,54,61,.6)' }, ticks: { color: '#8b949e', font: { size: 9 } } },
+        y: { grid: { color: 'rgba(48,54,61,.6)' }, ticks: { color: '#8b949e', font: { size: 9 } }, beginAtZero: true }
+      }
     }
   });
 }
 
-let chartTokens = makeChart('chartTokens', ['Usuario', 'IA'], [1, 1]);
-let chartLength = makeChart('chartLength', ['Usuario', 'IA'], [1, 1]);
-let chartTime   = makeChart('chartTime', ['Resp (s)'], [1]);
+// chartTokens → tokens por mensaje (barras verticales)
+let chartTokens = makeChart('chartTokens', ['—'], [0]);
+// chartTime → tiempo de respuesta en segundos (barras)
+let chartTime   = makeChart('chartTime', ['—'], [0]);
+
+let MAX_BARS = 8;
 
 function updateCharts() {
-  chartTokens.data.labels = conv.filter(m=>m.role==='user').slice(-6).map((_,i)=>'U'+conv.length);
-  chartTokens.data.datasets[0].data = userTokenLens.slice(-6);
+  // Tokens: últimas MAX_BARS interacciones de usuario
+  const tData   = userTokenLens.slice(-MAX_BARS);
+  const n       = tData.length;
+  chartTokens.data.labels = Array.from({length:n}, (_,i)=>'M'+(userTokenLens.length-n+i+1));
+  chartTokens.data.datasets[0].data = tData;
   chartTokens.update('none');
 
-  chartLength.data.labels = conv.slice(-6).map((m,i)=>m.role==='user'?'U':'AI');
-  chartLength.data.datasets[0].data = conv.slice(-6).map(m=>m.content.length);
-  chartLength.update('none');
+  // Tiempo de respuesta
+  chartTime.data.datasets[0].data = respTimes;
+  chartTime.data.labels = respTimes.map((_,i)=>'R'+(i+1));
+  chartTime.update('none');
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -228,18 +240,6 @@ async function sendMsg() {
                 document.getElementById('kpi-msgs').textContent = msgCount;
                 document.getElementById('kpi-time').textContent = elapsed + 's';
 
-                chartTokens.data.labels.push('M'+msgCount);
-                chartTokens.data.datasets[0].data.push(reply.split(/\s/).length);
-                if (chartTokens.data.datasets[0].data.length > 8) {
-                  chartTokens.data.labels.shift();
-                  chartTokens.data.datasets[0].data.shift();
-                }
-                chartTokens.update('none');
-
-                chartTime.data.datasets[0].data = respTimes.slice(-6);
-                chartTime.data.labels = respTimes.slice(-6).map((_,i)=>'R'+(respTimes.length-i));
-                chartTime.update('none');
-
                 updateCharts();
 
                 ragDot.classList.remove('active');
@@ -275,14 +275,14 @@ function clearChat() {
   document.getElementById('kpi-msgs').textContent = '0';
   document.getElementById('kpi-time').textContent = '—';
   document.getElementById('kpi-chunks').textContent = '—';
-  chartTokens.data.datasets[0].data = [1,1];
-  chartTokens.data.labels = ['Usuario','IA'];
+  chartTokens.data.datasets[0].data = [0];
+  chartTokens.data.labels = ['—'];
   chartTokens.update('none');
-  chartLength.data.datasets[0].data = [1,1];
-  chartLength.data.labels = ['Usuario','IA'];
+  chartLength.data.datasets[0].data = [0];
+  chartLength.data.labels = ['—'];
   chartLength.update('none');
-  chartTime.data.datasets[0].data = [1];
-  chartTime.data.labels = ['Resp (s)'];
+  chartTime.data.datasets[0].data = [];
+  chartTime.data.labels = ['—'];
   chartTime.update('none');
   // reload rag stats
   if (typeof loadRagStats === 'function') loadRagStats();
