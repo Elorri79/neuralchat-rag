@@ -1,3 +1,7 @@
+# Archivos del agente / sesión
+AGENTS.md
+*.session
+
 # Byte-compiled / optimized Python files
 __pycache__/
 *.py[cod]
