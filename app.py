@@ -9,7 +9,7 @@ app = Flask(__name__)
 app.secret_key = 'intelpulse-chatbot-v2-rag'
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL = "llama3.2:1b"
+MODEL = "qwen3.5:4b"
 
 TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
@@ -450,7 +450,7 @@ def chat_stream():
 
             r = requests.post(
                 OLLAMA_URL,
-                json={"model": model, "messages": messages_to_send, "stream": True},
+                json={"model": model, "messages": messages_to_send, "stream": True, "think": False},
                 stream=True,
                 timeout=120
             )

@@ -4,6 +4,11 @@ Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama*
 
 ![NeuralChat RAG](img/Captura%20de%20pantalla%202026-05-07%20a%20las%2014.19.52.png)
 
+## Modelo actual
+
+- **LLM**: `qwen3.5:4b` (4.7B parámetros) — rápido, sin thinking, respuesta directa en español
+- **Embeddings**: `llama3.2:1b` — generación de vectores para ChromaDB
+
 ## Características
 
 - **Chat en streaming** — respuestas en tiempo real con efecto de "tecleado"

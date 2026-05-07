@@ -10,8 +10,8 @@ import requests
 # ── Config ────────────────────────────────────────────────────────────────────
 
 OLLAMA_URL   = "http://127.0.0.1:11434"
-EMBED_MODEL  = "llama3.2:1b"          # modelo para embeddings
-LLM_MODEL    = "llama3.2:1b"          # modelo para chat
+EMBED_MODEL  = "llama3.2:1b"          # modelo para embeddings (no afecta calidad RAG)
+LLM_MODEL    = "qwen3.5:4b"           # modelo para chat
 COLLECTION   = "chatbot_docs"
 CHUNK_SIZE   = 300                    # palabras por chunk
 CHUNK_OVERLAP = 50                    # solape entre chunks
