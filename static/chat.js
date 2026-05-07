@@ -278,9 +278,6 @@ function clearChat() {
   chartTokens.data.datasets[0].data = [0];
   chartTokens.data.labels = ['—'];
   chartTokens.update('none');
-  chartLength.data.datasets[0].data = [0];
-  chartLength.data.labels = ['—'];
-  chartLength.update('none');
   chartTime.data.datasets[0].data = [];
   chartTime.data.labels = ['—'];
   chartTime.update('none');
