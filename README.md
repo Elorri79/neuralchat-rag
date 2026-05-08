@@ -13,7 +13,8 @@ Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama*
 
 - **Chat en streaming** — respuestas en tiempo real con efecto de "tecleado"
 - **RAG (Retrieval Augmented Generation)** — el modelo responde usando solo el contexto de los documentos que subas
-- **Gestión de documentos** — sube archivos `.txt`, `.md`, `.csv`, `.json`, `.html` y los ingiere automáticamente en la base vectorial
+- **Explorador de archivos** — navega por tu sistema de archivos, selecciona y ingiere documentos directamente desde carpetas locales
+- **Subida de archivos** — arrastra o selecciona archivos `.txt`, `.md`, `.csv`, `.json`, `.html` para ingestarlos en la base vectorial
 - **Retrieval semántico** — búsqueda por significado, no por palabras exactas
 - **KPI en tiempo real** — tokens enviados, mensajes, tiempo de respuesta, chunks en base
 - **Gráficos de actividad** — distribución de tokens, longitud de mensajes, tiempos de respuesta
@@ -23,7 +24,7 @@ Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama*
 
 | Componente | Tecnología |
 |---|---|
-| LLM | [Ollama](https://ollama.com/) — `llama3.2:1b` (configurable) |
+| LLM | [Ollama](https://ollama.com/) — `qwen3.5:4b` (configurable) |
 | Embeddings | Ollama `/api/embeddings` (mismo modelo que LLM) |
 | Base de datos vectorial | [ChromaDB](https://www.trychroma.com/) |
 | Servidor web | Flask 3.x |
@@ -158,12 +159,12 @@ Edita las primeras variables en `app.py` y `rag.py`:
 
 ```python
 # app.py
-MODEL = "llama3.2:1b"       # modelo para chat
+MODEL = "qwen3.5:4b"       # modelo para chat
 OLLAMA_URL = "http://127.0.0.1:11434"
 
 # rag.py
 EMBED_MODEL = "llama3.2:1b"  # modelo para embeddings (debe ser el mismo)
-LLM_MODEL = "llama3.2:1b"
+LLM_MODEL = "qwen3.5:4b"
 COLLECTION = "chatbot_docs"
 CHUNK_SIZE = 300             # palabras por chunk
 CHUNK_OVERLAP = 50            # solape entre chunks

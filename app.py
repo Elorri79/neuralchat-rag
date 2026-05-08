@@ -206,6 +206,61 @@ TEMPLATE = """<!DOCTYPE html>
   .upload-area input{display:none}
   .upload-hint{font-size:.8rem;color:var(--muted)}
   #ingest-result{margin-top:10px;font-size:.82rem;max-height:150px;overflow-y:auto;color:var(--ok)}
+
+  /* File browser */
+  .file-browser{
+    border:1px solid var(--border);border-radius:8px;overflow:hidden;
+    max-height:320px;overflow-y:auto;margin-bottom:10px;
+  }
+  .file-browser::-webkit-scrollbar{width:6px}
+  .file-browser::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  .fb-row{
+    display:flex;align-items:center;gap:8px;padding:8px 12px;
+    cursor:pointer;border-bottom:1px solid rgba(48,54,61,.5);
+    transition:background .1s;font-size:.82rem;user-select:none;
+  }
+  .fb-row:last-child{border-bottom:none}
+  .fb-row:hover{background:rgba(88,166,255,.06)}
+  .fb-row.dir:hover{background:rgba(199,125,255,.08)}
+  .fb-row input[type=checkbox]{accent-color:var(--purple);flex-shrink:0}
+  .fb-icon{font-size:1.1rem;flex-shrink:0;width:20px;text-align:center}
+  .fb-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fb-size{font-size:.7rem;color:var(--muted);flex-shrink:0}
+  .fb-path-bar{
+    display:flex;align-items:center;gap:6px;margin-bottom:8px;
+    background:var(--bg);border:1px solid var(--border);border-radius:6px;
+    padding:6px 10px;font-size:.75rem;min-height:34px;flex-wrap:wrap;
+  }
+  .fb-path-segment{
+    color:var(--accent);cursor:pointer;padding:2px 4px;border-radius:4px;
+  }
+  .fb-path-segment:hover{background:rgba(88,166,255,.12)}
+  .fb-path-sep{color:var(--muted)}
+  .fb-loading{text-align:center;padding:20px;color:var(--muted);font-size:.82rem}
+  .fb-empty{text-align:center;padding:20px;color:var(--muted);font-size:.82rem}
+  .fb-actions{
+    display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;
+  }
+  .fb-count{font-size:.78rem;color:var(--muted);flex:1}
+  .btn-ingest{
+    background:var(--purple)!important;color:#fff!important;
+    font-size:.82rem!important;padding:0 16px!important;height:38px!important;
+  }
+  .btn-ingest:disabled{opacity:.4!important;cursor:not-allowed!important}
+  .btn-select-all{
+    background:rgba(88,166,255,.15)!important;border:1px solid rgba(88,166,255,.3)!important;
+    color:var(--accent)!important;font-size:.78rem!important;padding:0 12px!important;height:34px!important;
+  }
+  .btn-back{
+    background:var(--surface)!important;border:1px solid var(--border)!important;
+    color:var(--muted)!important;font-size:.78rem!important;padding:0 12px!important;height:34px!important;
+  }
+  .ext-txt,.ext-md{color:#4d96ff}
+  .ext-csv{color:#3fb950}
+  .ext-json{color:#d29922}
+  .ext-html,.ext-htm{color:#f778ba}
+  .ext-py{color:#ffd93d}
+  .ext-pdf{color:#f85149}
 </style>
 </head>
 <body>
@@ -307,10 +362,27 @@ TEMPLATE = """<!DOCTYPE html>
 <div class="modal-overlay" id="ingest-modal">
   <div class="modal">
     <h2>📚 Gestionar Knowledge Base</h2>
-    <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
-      <input type="file" id="file-input" multiple accept=".txt,.md,.csv,.json">
-      <div style="font-size:1.4rem;margin-bottom:6px">📄</div>
-      <div class="upload-hint">Arrastra archivos aquí o haz clic para seleccionar<br><small>.txt .md .csv .json</small></div>
+
+    <!-- File browser -->
+    <div class="fb-path-bar" id="fb-path-bar">
+      <span style="color:var(--muted);font-size:.7rem">Cargando…</span>
+    </div>
+    <div class="file-browser" id="file-browser">
+      <div class="fb-loading">⏳ Cargando directorio…</div>
+    </div>
+
+    <div class="fb-actions">
+      <button class="btn-select-all" onclick="toggleSelectAll()">☑️ Sel. todos</button>
+      <span class="fb-count" id="fb-count">0 archivos seleccionados</span>
+      <button class="btn-ingest" id="btn-ingest" onclick="ingestSelected()" disabled>📥 Ingestar</button>
+    </div>
+
+    <div style="margin:10px 0;border-top:1px solid var(--border);padding-top:10px">
+      <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+        <input type="file" id="file-input" multiple accept=".txt,.md,.csv,.json,.html,.htm">
+        <div style="font-size:1.4rem;margin-bottom:6px">📄</div>
+        <div class="upload-hint">Arrastra archivos aquí o haz clic para seleccionar<br><small>.txt .md .csv .json .html .htm</small></div>
+      </div>
     </div>
     <div id="ingest-result"></div>
     <div class="modal-actions">
@@ -326,15 +398,6 @@ TEMPLATE = """<!DOCTYPE html>
 
 <script src="{{ url_for('static', filename='chat.js') }}"></script>
 <script>
-// ── Ingest modal ──────────────────────────────────────────────────────────────
-function openIngestModal() {
-  document.getElementById('ingest-modal').classList.add('open');
-  loadRagStats();
-}
-function closeIngestModal() {
-  document.getElementById('ingest-modal').classList.remove('open');
-}
-
 // ── RAG stats ─────────────────────────────────────────────────────────────────
 async function loadRagStats() {
   try {
@@ -402,6 +465,194 @@ async function resetRag() {
     resultEl.innerHTML = `<span style="color:var(--ok)">${d.status}</span>`;
     loadRagStats();
   } catch(e) { resultEl.innerHTML = `<span style="color:var(--crit)">${e.message}</span>`; }
+}
+
+// ── File Browser ───────────────────────────────────────────────────────────────
+const SUPPORTED_EXTS = new Set(['.txt','.md','.csv','.json','.html','.htm','.py','.pdf']);
+
+let fbCurrentPath = '';
+let fbHome = '';
+let fbEntries = [];       // [{name, path, is_dir, size}]
+let fbSelected = new Set();
+
+const FILE_ICONS = {
+  dir:  '📁',
+  txt:  '📄', md:  '📝', csv: '📊', json: '🔗',
+  html: '🌐', htm: '🌐', py:  '🐍', pdf: '📕',
+};
+function fileIcon(name) {
+  if (name === '..') return '↩️';
+  const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+  if (ext === '.txt') return '📄';
+  if (ext === '.md')  return '📝';
+  if (ext === '.csv') return '📊';
+  if (ext === '.json') return '🔗';
+  if (ext === '.html' || ext === '.htm') return '🌐';
+  if (ext === '.py')  return '🐍';
+  if (ext === '.pdf') return '📕';
+  return '📄';
+}
+function extColor(name) {
+  const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+  if (ext === '.txt') return 'var(--accent)';
+  if (ext === '.md')  return '#4d96ff';
+  if (ext === '.csv') return '#3fb950';
+  if (ext === '.json') return '#d29922';
+  if (ext === '.html' || ext === '.htm') return '#f778ba';
+  if (ext === '.py')  return '#ffd93d';
+  if (ext === '.pdf') return '#f85149';
+  return 'var(--muted)';
+}
+
+function formatSize(bytes) {
+  if (bytes === 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
+
+async function loadDir(path) {
+  const browser = document.getElementById('file-browser');
+  browser.innerHTML = '<div class="fb-loading">⏳ Cargando…</div>';
+  try {
+    const r = await fetch('/rag/browse?path=' + encodeURIComponent(path));
+    const d = await r.json();
+    fbCurrentPath = d.path;
+    fbHome = d.home;
+    fbEntries = d.entries || [];
+    if (d.error) {
+      browser.innerHTML = `<div class="fb-empty">⚠️ ${d.error}</div>`;
+      return;
+    }
+    renderBrowser();
+    renderPathBar();
+  } catch(e) {
+    browser.innerHTML = `<div class="fb-empty">⚠️ Error: ${e.message}</div>`;
+  }
+}
+
+function renderBrowser() {
+  const browser = document.getElementById('file-browser');
+  if (fbEntries.length === 0) {
+    browser.innerHTML = '<div class="fb-empty">Carpeta vacía</div>';
+    return;
+  }
+  browser.innerHTML = fbEntries.map((e, i) => {
+    const icon = e.is_dir ? '📁' : fileIcon(e.name);
+    const checked = fbSelected.has(e.path) ? 'checked' : '';
+    const ext = e.name.slice(e.name.lastIndexOf('.')).toLowerCase();
+    const supported = e.is_dir || SUPPORTED_EXTS.has(ext);
+    const dimmed = !e.is_dir && !supported ? 'opacity:.45' : '';
+    return `<div class="fb-row ${e.is_dir ? 'dir' : 'file'}" data-index="${i}" style="${dimmed}">
+      <input type="checkbox" ${checked} ${e.is_dir ? 'disabled' : ''} onclick="event.stopPropagation(); toggleFile('${e.path.replace(/'/g,"\\'")}')">
+      <span class="fb-icon">${icon}</span>
+      <span class="fb-name" style="${!e.is_dir ? 'color:'+extColor(e.name) : ''}">${e.name}</span>
+      ${e.is_dir ? '' : `<span class="fb-size">${formatSize(e.size)}</span>`}
+    </div>`;
+  }).join('');
+
+  // Click row → enter dir or toggle checkbox
+  browser.querySelectorAll('.fb-row').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.type === 'checkbox') return;
+      const idx = parseInt(row.dataset.index);
+      const entry = fbEntries[idx];
+      if (entry.is_dir) {
+        fbSelected.delete(entry.path);
+        updateIngestBtn();
+        loadDir(entry.path);
+      } else {
+        const ext = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
+        if (SUPPORTED_EXTS.has(ext)) {
+          toggleFile(entry.path);
+        }
+      }
+    });
+  });
+}
+
+function renderPathBar() {
+  const bar = document.getElementById('fb-path-bar');
+  const parts = fbCurrentPath.replace(fbHome, '~').split('/').filter(Boolean);
+  let html = `<span class="fb-path-segment" onclick="loadDir(fbHome)">~</span>`;
+  let built = fbHome;
+  for (const p of parts) {
+    built = built + '/' + p;
+    html += `<span class="fb-path-sep">/</span><span class="fb-path-segment" onclick="loadDir('${built.replace(/'/g,"\\'")}')">${p}</span>`;
+  }
+  bar.innerHTML = html;
+}
+
+function toggleFile(path) {
+  if (fbSelected.has(path)) fbSelected.delete(path);
+  else fbSelected.add(path);
+  updateIngestBtn();
+  renderBrowser();
+}
+
+function toggleSelectAll() {
+  const files = fbEntries.filter(e => !e.is_dir && SUPPORTED_EXTS.has(e.name.slice(e.name.lastIndexOf('.')).toLowerCase()));
+  if (fbSelected.size === files.length) {
+    fbSelected.clear();
+  } else {
+    files.forEach(f => fbSelected.add(f.path));
+  }
+  updateIngestBtn();
+  renderBrowser();
+}
+
+function updateIngestBtn() {
+  const count = fbSelected.size;
+  document.getElementById('fb-count').textContent = count === 0
+    ? '0 archivos seleccionados'
+    : `${count} archivo${count !== 1 ? 's' : ''} seleccionado${count !== 1 ? 's' : ''}`;
+  document.getElementById('btn-ingest').disabled = count === 0;
+}
+
+async function ingestSelected() {
+  const paths = Array.from(fbSelected);
+  if (paths.length === 0) return;
+  const btn = document.getElementById('btn-ingest');
+  const countEl = document.getElementById('fb-count');
+  btn.disabled = true;
+  countEl.textContent = '⏳ Ingestando…';
+  try {
+    const r = await fetch('/rag/ingest-paths', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths })
+    });
+    const d = await r.json();
+    resultEl.innerHTML = '';
+    if (d.error) {
+      resultEl.innerHTML = `<span style="color:var(--crit)">Error: ${d.error}</span>`;
+    } else {
+      const total = d.total_chunks || 0;
+      resultEl.innerHTML = `<span style="color:var(--ok)">✅ ${total} chunks de ${d.files.length} archivo(s)</span><br>` +
+        d.files.map(f => `${f.file}: ${f.status === 'ok' ? f.chunks + ' chunks' : f.status}`).join('<br>');
+      fbSelected.clear();
+      updateIngestBtn();
+      renderBrowser();
+    }
+    loadRagStats();
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:var(--crit)">Error: ${e.message}</span>`;
+  }
+  btn.disabled = false;
+}
+
+// ── Modal open/close ───────────────────────────────────────────────────────────
+let modalOpened = false;
+function openIngestModal() {
+  document.getElementById('ingest-modal').classList.add('open');
+  if (!modalOpened) {
+    modalOpened = true;
+    loadDir('');
+  }
+  loadRagStats();
+}
+function closeIngestModal() {
+  document.getElementById('ingest-modal').classList.remove('open');
 }
 </script>
 </body>
@@ -517,6 +768,73 @@ def rag_retrieve():
 def rag_reset():
     msg = rag.reset_collection()
     return jsonify({"status": "ok" if msg is True else msg})
+
+@app.route("/rag/browse")
+def rag_browse():
+    """Lista el contenido de un directorio. path GET = ruta a explorar."""
+    import os as _os
+    requested = request.args.get("path", "")
+    # Seguridad: solo permitir rutas dentro del home del usuario
+    home = _os.path.expanduser("~")
+    # Normalizar y resolver
+    if requested:
+        requested = _os.path.normpath(requested)
+        # Evitar path traversal
+        if not requested.startswith(home):
+            requested = home
+    else:
+        requested = home
+
+    try:
+        entries = []
+        # Añadir ".." para volver al directorio padre si no estamos en home
+        if requested != home:
+            entries.append({"name": "..", "path": _os.path.dirname(requested), "is_dir": True, "size": 0})
+        for name in sorted(_os.listdir(requested)):
+            if name.startswith("."):
+                continue
+            fpath = _os.path.join(requested, name)
+            try:
+                stat = _os.stat(fpath)
+                is_dir = _os.path.isdir(fpath)
+                size = stat.st_size if not is_dir else 0
+                entries.append({
+                    "name": name,
+                    "path": fpath,
+                    "is_dir": is_dir,
+                    "size": size,
+                })
+            except PermissionError:
+                pass
+        # Ordenar: dirs primero, luego archivos, ambos alfabético
+        entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+        return jsonify({"path": requested, "home": home, "entries": entries})
+    except PermissionError:
+        return jsonify({"path": requested, "home": home, "entries": [], "error": "Permiso denegado"})
+    except Exception as e:
+        return jsonify({"path": requested, "home": home, "entries": [], "error": str(e)})
+
+@app.route("/rag/ingest-paths", methods=["POST"])
+def rag_ingest_paths():
+    """Recibe rutas de archivo locales y las ingiere en ChromaDB."""
+    import os as _os
+    data = request.get_json()
+    paths = data.get("paths", []) if data else []
+    if not paths:
+        return jsonify({"error": "No se enviaron rutas"}), 400
+
+    results = {"files": [], "total_chunks": 0}
+    for fpath in paths:
+        if not _os.path.isfile(fpath):
+            results["files"].append({"file": fpath, "status": "not_found"})
+            continue
+        try:
+            r = rag.ingest_file(fpath)
+            results["files"].append({"file": _os.path.basename(fpath), **r})
+            results["total_chunks"] += r.get("chunks", 0)
+        except Exception as e:
+            results["files"].append({"file": _os.path.basename(fpath), "status": "error", "error": str(e)})
+    return jsonify(results)
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 

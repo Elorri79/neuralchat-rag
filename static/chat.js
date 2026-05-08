@@ -100,7 +100,7 @@ function addMessage(role, content, extraClass='') {
   if (role === 'ai') {
     const name = document.createElement('div');
     name.className = 'name';
-    name.innerHTML = '<span style="color:#c77dff">◈</span> NeuroGPT';
+    name.innerHTML = '<span style="color:#c77dff">◈</span> RagBot';
     div.appendChild(name);
     content = formatContent(content);
   }
@@ -225,7 +225,7 @@ async function sendMsg() {
               const obj = JSON.parse(line.slice(5));
               if (obj.message?.content) {
                 reply += obj.message.content;
-                aiDiv.innerHTML = '<div class="name"><span style="color:#c77dff">◈</span> NeuroGPT</div>' + formatContent(reply);
+                aiDiv.innerHTML = '<div class="name"><span style="color:#c77dff">◈</span> RagBot</div>' + formatContent(reply);
                 scrollBottom();
               }
               if (obj.done) {
