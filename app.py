@@ -16,7 +16,7 @@ TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NeuralChat — Panel Conversacional RAG</title>
+<title>NeuralChat v3 — Panel Conversacional RAG</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -266,11 +266,14 @@ TEMPLATE = """<!DOCTYPE html>
 <body>
 
 <header>
-  <h1>Neural<span>Chat</span><small>v2 · RAG</small></h1>
+  <h1>Neural<span>Chat</span><small>v3 · RAG</small></h1>
   <div style="display:flex;gap:10px;align-items:center">
-    <div class="rag-badge" onclick="openIngestModal()" title="Gestionar documentos RAG">📚 RAG</div>
-    <div class="model-badge">🤖 {{ model }}</div>
-  </div>
+      <select id="model-select" style="background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--accent);font-size:.8rem;padding:4px 12px;cursor:pointer">
+        <option value="">Cargando…</option>
+      </select>
+      <div class="rag-badge" onclick="openIngestModal()" title="Gestionar documentos RAG">📚 RAG</div>
+      <div class="model-badge">🤖 {{ model }}</div>
+    </div>
 </header>
 
 <!-- KPI bar -->
@@ -393,7 +396,7 @@ TEMPLATE = """<!DOCTYPE html>
 </div>
 
 <footer>
-  NeuralChat v2 · RAG con Ollama · ChromaDB · {{ model }}
+  NeuralChat v3 · RAG con Ollama · ChromaDB · {{ model }}
 </footer>
 
 <script src="{{ url_for('static', filename='chat.js') }}"></script>
@@ -769,6 +772,17 @@ def rag_reset():
     msg = rag.reset_collection()
     return jsonify({"status": "ok" if msg is True else msg})
 
+@app.route("/models", methods=["GET"])
+def list_models():
+    """Devuelve los modelos disponibles en Ollama."""
+    try:
+        r = requests.get(f"{OLLAMA_URL.replace('/api/chat', '')}/api/tags", timeout=5)
+        r.raise_for_status()
+        models = r.json().get("models", [])
+        return jsonify({"models": [m["name"] for m in models]})
+    except Exception as e:
+        return jsonify({"models": [], "error": str(e)}), 500
+
 @app.route("/rag/browse")
 def rag_browse():
     """Lista el contenido de un directorio. path GET = ruta a explorar."""
@@ -839,8 +853,8 @@ def rag_ingest_paths():
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("\n  ╔══════════════════════════════════════╗")
-    print("  ║   NeuralChat v2 — RAG + Ollama       ║")
+print("\n  ╔══════════════════════════════════════╗")
+    print("  ║   NeuralChat v3 — RAG + Ollama       ║")
     print("  ╚══════════════════════════════════════╝")
     print(f"  → http://localhost:5051")
     print(f"  → Modelo: {MODEL}")

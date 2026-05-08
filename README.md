@@ -1,4 +1,4 @@
-# NeuralChat — Chatbot RAG con Ollama
+# NeuralChat v3 — Chatbot RAG con Ollama
 
 Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama** como LLM local y **ChromaDB** como base de datos vectorial.
 
@@ -14,7 +14,8 @@ Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama*
 - **Chat en streaming** — respuestas en tiempo real con efecto de "tecleado"
 - **RAG (Retrieval Augmented Generation)** — el modelo responde usando solo el contexto de los documentos que subas
 - **Explorador de archivos** — navega por tu sistema de archivos, selecciona y ingiere documentos directamente desde carpetas locales
-- **Subida de archivos** — arrastra o selecciona archivos `.txt`, `.md`, `.csv`, `.json`, `.html` para ingestarlos en la base vectorial
+- **Selector de modelo** — elige entre cualquier modelo Ollama instalado y cambialo en tiempo real sin reiniciar
+- **Gestión de documentos** — sube archivos `.txt`, `.md`, `.csv`, `.json`, `.html` y los ingiere automáticamente en la base vectorial
 - **Retrieval semántico** — búsqueda por significado, no por palabras exactas
 - **KPI en tiempo real** — tokens enviados, mensajes, tiempo de respuesta, chunks en base
 - **Gráficos de actividad** — distribución de tokens, longitud de mensajes, tiempos de respuesta

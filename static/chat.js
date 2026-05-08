@@ -13,6 +13,34 @@ let userTokenLens = [];
 let aiTokenLens = [];
 let ragDocs = [];       // último resultado de retrieval
 let ragEnabled = true;  // toggle RAG
+let currentModel = MODEL;
+
+// ── Model selector ────────────────────────────────────────────────────────────
+async function loadModels() {
+  const sel = document.getElementById('model-select');
+  if (!sel) return;
+  try {
+    const r = await fetch('/models');
+    const d = await r.json();
+    if (d.models && d.models.length) {
+      sel.innerHTML = d.models.map(m =>
+        `<option value="${m}" ${m === currentModel ? 'selected' : ''}>${m}</option>`
+      ).join('');
+      sel.addEventListener('change', () => {
+        currentModel = sel.value;
+        // Update data attribute for subsequent conversations
+        document.getElementById('chat-root').dataset.model = currentModel;
+        // Also update the model badge in header to show current selection
+        document.querySelector('.model-badge').textContent = '🤖 ' + currentModel;
+      });
+    } else {
+      sel.innerHTML = '<option value="">Sin modelos</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">Error cargando</option>';
+  }
+}
+loadModels();
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
 const chat    = document.getElementById('chat');
@@ -195,7 +223,7 @@ async function sendMsg() {
   const t0 = Date.now();
 
   try {
-    const body = { model: MODEL, messages: conv, rag: ragEnabled, rag_context: ragDocs };
+    const body = { model: currentModel, messages: conv, rag: ragEnabled, rag_context: ragDocs };
 
     const res = await fetch('/chat/stream', {
       method: 'POST',
