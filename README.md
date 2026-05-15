@@ -2,7 +2,8 @@
 
 Chatbot conversacional con Retrieval Augmented Generation (RAG) usando **Ollama** como LLM local, **ChromaDB** como base de datos vectorial e **hilos de conversación persistentes**. 100% local.
 
-> *🖼️ Screenshot próximamente — guarda una captura como `img/screenshot.png` y actualiza la ruta.*
+![NeuralChat RAG - Panel principal](img/screenshot1.png)
+![NeuralChat RAG - Gestión de documentos](img/screenshot2.png)
 
 ## Modelos por defecto
 
