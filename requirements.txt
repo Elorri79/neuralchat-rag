@@ -1,3 +1,5 @@
 flask>=3.0
 chromadb>=1.5
 requests>=2.31
+pypdf>=4.0
+python-dotenv>=1.0

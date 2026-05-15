@@ -1,27 +1,23 @@
-"""
-RAG — Retrieval Augmented Generation con Ollama + ChromaDB
-"""
-
-import os, hashlib, re, uuid, html
+import os, hashlib, re, uuid, html, logging
+from threading import Lock
 import chromadb
 from chromadb.config import Settings
 import requests
 
-# ── Config ────────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
 
-OLLAMA_URL   = "http://127.0.0.1:11434"
-EMBED_MODEL  = "llama3.2:1b"          # modelo para embeddings (no afecta calidad RAG)
-LLM_MODEL    = "qwen3.5:4b"           # modelo para chat
+OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+EMBED_MODEL  = os.getenv("EMBED_MODEL", "llama3.2:1b")
+LLM_MODEL    = os.getenv("LLM_MODEL", "qwen3.5:4b")
 COLLECTION   = "chatbot_docs"
-CHUNK_SIZE   = 300                    # palabras por chunk
-CHUNK_OVERLAP = 50                    # solape entre chunks
-
-# ── ChromaDB client ────────────────────────────────────────────────────────────
+CHUNK_SIZE   = 300
+CHUNK_OVERLAP = 50
 
 db_dir = os.path.join(os.path.dirname(__file__), ".chromadb")
 os.makedirs(db_dir, exist_ok=True)
 
 chroma_client = chromadb.PersistentClient(path=db_dir)
+_chroma_lock = Lock()
 
 def get_collection():
     return chroma_client.get_or_create_collection(
@@ -29,10 +25,7 @@ def get_collection():
         metadata={"description": "Documentos del chatbot RAG"}
     )
 
-# ── Embeddings via Ollama ─────────────────────────────────────────────────────
-
 def get_embedding(text: str) -> list[float]:
-    """Genera embedding via API REST de Ollama."""
     r = requests.post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -41,14 +34,10 @@ def get_embedding(text: str) -> list[float]:
     r.raise_for_status()
     return r.json()["embedding"]
 
-def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Embeddings por lotes (serial, compatible con llama3.2:1b)."""
+def get_embeddings_sequential(texts: list[str]) -> list[list[float]]:
     return [get_embedding(t) for t in texts]
 
-# ── Chunking ─────────────────────────────────────────────────────────────────
-
 def chunk_text(text: str) -> list[str]:
-    """Chunking por palabras con solape."""
     words = text.split()
     chunks = []
     start  = 0
@@ -60,10 +49,7 @@ def chunk_text(text: str) -> list[str]:
         start += CHUNK_SIZE - CHUNK_OVERLAP
     return chunks
 
-# ── Text extraction ───────────────────────────────────────────────────────────
-
 def _clean_html(text: str) -> str:
-    """Limpia tags HTML y decodifica entidades."""
     text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
     text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
     text = re.sub(r'<[^>]+>', ' ', text)
@@ -72,7 +58,6 @@ def _clean_html(text: str) -> str:
     return text
 
 def extract_text(filepath: str) -> str:
-    """Extrae texto de archivos .txt .md .csv .json .html .htm."""
     ext = os.path.splitext(filepath)[1].lower()
     if ext in (".txt", ".md", ".csv"):
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
@@ -94,34 +79,41 @@ def extract_text(filepath: str) -> str:
                 for v in obj.values(): flatten(v)
         flatten(data)
         return "\n".join(texts)
+    elif ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return ""
+        reader = PdfReader(filepath)
+        pages = []
+        for page in reader.pages:
+            t = page.extract_text()
+            if t:
+                pages.append(t)
+        return "\n".join(pages)
     return ""
 
-# ── Ingest ────────────────────────────────────────────────────────────────────
-
 def ingest_file(filepath: str, metadata: dict = None) -> dict:
-    """Ingiere un archivo: extrae texto, chunk, embed, almacena en ChromaDB."""
     filename = os.path.basename(filepath)
-    text      = extract_text(filepath)
+    text = extract_text(filepath)
     if not text.strip():
         return {"chunks": 0, "status": "empty"}
 
     chunks = chunk_text(text)
-    n      = len(chunks)
+    n = len(chunks)
 
-    # Pre-generar todos los embeddings
-    print(f"  Generando {n} embeddings para '{filename}'…")
-    embeddings = get_embeddings_batch(chunks)
+    logger.info("Generando %d embeddings para '%s'…", n, filename)
+    embeddings = get_embeddings_sequential(chunks)
 
-    col   = get_collection()
-    ids   = [f"{filename}#{i}" for i in range(n)]
-    metadatas = [{"source": filename, "chunk": i, **(metadata or {})} for i in range(n)]
-
-    col.add(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
+    with _chroma_lock:
+        col = get_collection()
+        ids = [f"{filename}#{i}" for i in range(n)]
+        metadatas = [{"source": filename, "chunk": i, **(metadata or {})} for i in range(n)]
+        col.add(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
 
     return {"chunks": n, "status": "ok"}
 
-def ingest_directory(directory: str, extensions: tuple = (".txt", ".md", ".csv", ".json", ".html", ".htm")) -> dict:
-    """Ingiere todos los archivos de un directorio recursivamente."""
+def ingest_directory(directory: str, extensions: tuple = (".txt", ".md", ".csv", ".json", ".html", ".htm", ".pdf")) -> dict:
     total_chunks = 0
     files_processed = []
     for root, _, files in os.walk(directory):
@@ -133,29 +125,28 @@ def ingest_directory(directory: str, extensions: tuple = (".txt", ".md", ".csv",
                     total_chunks += result["chunks"]
                     files_processed.append({"file": fname, **result})
                 except Exception as e:
+                    logger.error("Error ingesting %s: %s", fname, e)
                     files_processed.append({"file": fname, "status": "error", "error": str(e)})
     return {"total_chunks": total_chunks, "files": files_processed}
 
-# ── Retrieval ────────────────────────────────────────────────────────────────
-
 def retrieve(query: str, top_k: int = 4) -> list[dict]:
-    """Recupera los top_k chunks más relevantes para la query."""
     try:
         q_embedding = get_embedding(query)
     except Exception as e:
-        print(f"[RAG] Embedding query error: {e}")
+        logger.error("Embedding query error: %s", e)
         return []
 
-    col = get_collection()
-    try:
-        results = col.query(
-            query_embeddings=[q_embedding],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"]
-        )
-    except Exception as e:
-        print(f"[RAG] Query error: {e}")
-        return []
+    with _chroma_lock:
+        col = get_collection()
+        try:
+            results = col.query(
+                query_embeddings=[q_embedding],
+                n_results=top_k,
+                include=["documents", "metadatas", "distances"]
+            )
+        except Exception as e:
+            logger.error("Query error: %s", e)
+            return []
 
     docs = []
     for i in range(len(results.get("ids", [[]])[0])):
@@ -167,10 +158,7 @@ def retrieve(query: str, top_k: int = 4) -> list[dict]:
         })
     return docs
 
-# ── Build RAG prompt ─────────────────────────────────────────────────────────
-
 def build_rag_prompt(user_query: str, docs: list[dict]) -> str:
-    """Construye el prompt del sistema con el contexto recuperado."""
     if not docs:
         context_block = "(No se ha encontrado contexto relevante en la base de conocimiento.)"
     else:
@@ -189,26 +177,66 @@ def build_rag_prompt(user_query: str, docs: list[dict]) -> str:
         "=== RESPUESTA ==="
     )
 
-# ── Stats ─────────────────────────────────────────────────────────────────────
-
 def collection_stats() -> dict:
-    """Estadísticas de la colección."""
-    col = get_collection()
-    count = col.count()
-    if count == 0:
-        return {"chunks": 0, "sources": []}
-    try:
-        results = col.get(include=["metadatas"])
-        sources = list({m["source"] for m in results.get("metadatas", []) if m})
-    except Exception:
-        sources = []
-    return {"chunks": count, "sources": sources}
+    with _chroma_lock:
+        col = get_collection()
+        count = col.count()
+        if count == 0:
+            return {"chunks": 0, "sources": []}
+        try:
+            results = col.get(include=["metadatas"])
+            sources = list({m["source"] for m in results.get("metadatas", []) if m})
+        except Exception:
+            sources = []
+        return {"chunks": count, "sources": sources}
 
 def reset_collection():
-    """Borra todos los documentos de la colección."""
     try:
-        chroma_client.delete_collection(COLLECTION)
-        chroma_client.get_or_create_collection(name=COLLECTION, metadata={"description": "Documentos del chatbot RAG"})
+        with _chroma_lock:
+            chroma_client.delete_collection(COLLECTION)
+            chroma_client.get_or_create_collection(name=COLLECTION, metadata={"description": "Documentos del chatbot RAG"})
         return True
     except Exception as e:
         return str(e)
+
+def list_documents() -> list[dict]:
+    with _chroma_lock:
+        col = get_collection()
+        count = col.count()
+        if count == 0:
+            return []
+        try:
+            results = col.get(include=["metadatas"])
+            source_map = {}
+            for m in results.get("metadatas", []):
+                if m:
+                    src = m.get("source", "?")
+                    source_map.setdefault(src, 0)
+                    source_map[src] += 1
+            return [{"source": src, "chunks": n} for src, n in sorted(source_map.items())]
+        except Exception as e:
+            logger.error("list_documents error: %s", e)
+            return []
+
+def get_document_content(source: str) -> str:
+    with _chroma_lock:
+        col = get_collection()
+        try:
+            results = col.get(where={"source": source}, include=["documents"])
+            docs = results.get("documents", [])
+            if docs:
+                return "\n\n---\n\n".join(docs)
+            return ""
+        except Exception as e:
+            logger.error("get_document_content error: %s", e)
+            return ""
+
+def delete_document(source: str) -> bool:
+    with _chroma_lock:
+        col = get_collection()
+        try:
+            col.delete(where={"source": source})
+            return True
+        except Exception as e:
+            logger.error("delete_document error: %s", e)
+            return False
