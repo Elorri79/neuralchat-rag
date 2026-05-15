@@ -4,91 +4,110 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NeuralChat v3 — Panel Conversacional RAG</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-<header>
-  <h1>Neural<span>Chat</span><small>v3 · RAG</small></h1>
-  <div style="display:flex;gap:10px;align-items:center">
-      <select id="model-select" style="background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--accent);font-size:.8rem;padding:4px 12px;cursor:pointer">
-        <option value="">Cargando…</option>
-      </select>
-      <div class="rag-badge" onclick="openIngestModal()" title="Gestionar documentos RAG">📚 RAG</div>
-      <div class="model-badge">🤖 {{ model }}</div>
-    </div>
-</header>
-
-<div class="kpi-bar" id="chat-root" data-model="{{ model }}" data-ollama="{{ ollama_url }}">
-  <div class="kpi crit">
-    <div class="kpi-icon">🧠</div>
-    <div class="kpi-info">
-      <div class="kpi-label">Tokens enviados</div>
-      <div class="kpi-value" id="kpi-tokens">0</div>
-    </div>
-  </div>
-  <div class="kpi ok">
-    <div class="kpi-icon">💬</div>
-    <div class="kpi-info">
-      <div class="kpi-label">Mensajes</div>
-      <div class="kpi-value" id="kpi-msgs">0</div>
-    </div>
-  </div>
-  <div class="kpi warn">
-    <div class="kpi-icon">⏱️</div>
-    <div class="kpi-info">
-      <div class="kpi-label">Tiempo resp.</div>
-      <div class="kpi-value" id="kpi-time">—</div>
-    </div>
-  </div>
-  <div class="kpi purple">
-    <div class="kpi-icon">📚</div>
-    <div class="kpi-info">
-      <div class="kpi-label">Chunks</div>
-      <div class="kpi-value" id="kpi-chunks">—</div>
-    </div>
-  </div>
-  <div class="kpi cyan">
-    <div class="kpi-icon">📊</div>
-    <div class="kpi-info">
-      <div class="kpi-label">Sesión</div>
-      <div class="kpi-value">{{ session_id[:8] }}…</div>
+<!-- Auth Overlay -->
+<div class="modal-overlay" id="auth-overlay">
+  <div class="modal" style="width:400px">
+    <h2 id="auth-title">🔐 Iniciar sesión</h2>
+    <div id="auth-error" style="color:var(--crit);font-size:.82rem;margin-bottom:10px;display:none"></div>
+    <input type="text" id="auth-username" placeholder="Usuario" autocomplete="username">
+    <input type="password" id="auth-password" placeholder="Contraseña" autocomplete="current-password">
+    <div class="modal-actions" style="flex-direction:column;gap:8px">
+      <button id="auth-submit" style="width:100%">Entrar</button>
+      <button id="auth-toggle" class="btn-cancel" style="width:100%;text-align:center;height:auto;padding:8px">¿No tienes cuenta? Registrarse</button>
     </div>
   </div>
 </div>
 
+<header>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button class="panel-toggle" id="toggle-sessions" onclick="togglePanel('sessions')" title="Conversaciones">◀</button>
+    <h1>Neural<span>Chat</span><small>v3 · RAG</small></h1>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+      <select id="model-select" style="background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--accent);font-size:.8rem;padding:4px 12px;cursor:pointer">
+        <option value="">Modelos…</option>
+      </select>
+      <div class="rag-badge" onclick="openIngestModal()" title="Gestión de documentos y usuarios">📚 Menú</div>
+      <div class="model-badge">🤖 {{ model }}</div>
+      <div class="user-menu" id="user-menu" style="display:none">
+        <div class="user-badge" id="user-badge"></div>
+        <div class="user-dropdown" id="user-dropdown">
+          <div class="dropdown-info" id="dropdown-info"></div>
+          <button class="dropdown-logout" onclick="logout()">🚪 Cerrar sesión</button>
+        </div>
+      </div>
+      <button class="panel-toggle" id="toggle-docs" onclick="togglePanel('docs')" title="Documentos">▶</button>
+  </div>
+</header>
+
 <div class="main-layout">
 
-  <div class="sidebar">
-    <h3>📈 Actividad del modelo</h3>
-    <div class="chart-card">
-      <div class="chart-label">Tokens por mensaje</div>
-      <div style="height:80px;position:relative"><canvas id="chartTokens"></canvas></div>
+  <!-- Sessions panel (left) -->
+  <div class="panel panel-left" id="panel-sessions">
+    <div class="panel-header">
+      <h3>💬 Conversaciones</h3>
+      <button class="btn-new-chat" onclick="newSession()" title="Nueva conversación">+</button>
     </div>
-    <div class="chart-card">
-      <div class="chart-label">Tiempo resp. (s)</div>
-      <div style="height:80px;position:relative"><canvas id="chartTime"></canvas></div>
-    </div>
-
-    <div class="rag-panel" id="rag-panel" style="display:none">
-      <h4>📚 Contexto RAG</h4>
-      <div id="rag-sources" class="rag-sources"></div>
-      <label class="rag-toggle">
-        <input type="checkbox" id="rag-enabled" checked>
-        Usar RAG en esta conversación
-      </label>
-    </div>
+    <div id="sessions-list" class="panel-scroll"></div>
   </div>
 
+  <!-- Chat area (center) -->
   <div class="chat-area">
+    <div class="kpi-bar" id="chat-root" data-model="{{ model }}" data-ollama="{{ ollama_url }}">
+      <div class="kpi crit">
+        <div class="kpi-icon">🧠</div>
+        <div class="kpi-info">
+          <div class="kpi-label">Tokens enviados</div>
+          <div class="kpi-value" id="kpi-tokens">0</div>
+        </div>
+      </div>
+      <div class="kpi ok">
+        <div class="kpi-icon">💬</div>
+        <div class="kpi-info">
+          <div class="kpi-label">Mensajes</div>
+          <div class="kpi-value" id="kpi-msgs">0</div>
+        </div>
+      </div>
+      <div class="kpi warn">
+        <div class="kpi-icon">⏱️</div>
+        <div class="kpi-info">
+          <div class="kpi-label">Tiempo resp.</div>
+          <div class="kpi-value" id="kpi-time">—</div>
+        </div>
+      </div>
+      <div class="kpi purple">
+        <div class="kpi-icon">📚</div>
+        <div class="kpi-info">
+          <div class="kpi-label">Chunks</div>
+          <div class="kpi-value" id="kpi-chunks">—</div>
+        </div>
+      </div>
+      <div class="kpi cyan">
+        <div class="kpi-icon">💾</div>
+        <div class="kpi-info">
+          <div class="kpi-label">Storage</div>
+          <div class="kpi-value" id="kpi-storage">—</div>
+        </div>
+      </div>
+    </div>
+
     <div class="chat-header">
       <div class="chat-status">
         <div class="dot" id="dot"></div>
         <div class="rag-dot" id="rag-dot"></div>
         <span id="status-text">Conectado a Ollama</span>
+        <span style="color:var(--muted);margin:0 6px">|</span>
+        <label style="font-size:.75rem;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="rag-enabled" checked style="accent-color:var(--purple)"> RAG
+        </label>
       </div>
-      <span style="font-size:.78rem;color:var(--muted)">{{ model }}</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="session-title" style="font-size:.78rem;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      </div>
     </div>
 
     <div id="chat"></div>
@@ -99,8 +118,22 @@
       <button type="button" class="btn-clear" onclick="clearChat()">Limpiar</button>
     </div>
   </div>
+
+  <!-- Documents panel (right) -->
+  <div class="panel panel-right" id="panel-docs">
+    <div class="panel-header">
+      <h3>📄 Documentos</h3>
+      <button class="btn-new-chat" onclick="openIngestModal()" title="Gestionar documentos">+</button>
+    </div>
+    <div id="docs-list" class="panel-scroll">
+      <div class="panel-empty" id="docs-empty">Sin documentos todavía.<br>Haz clic en 📚 RAG para añadir.</div>
+    </div>
+    <div id="docs-preview" class="docs-preview" style="display:none"></div>
+  </div>
+
 </div>
 
+<!-- Ingest modal -->
 <div class="modal-overlay" id="ingest-modal">
   <div class="modal">
     <h2>📚 Gestionar Knowledge Base</h2>
@@ -131,13 +164,18 @@
       </div>
     </div>
 
-    <div id="doc-list-section" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
-      <h4 style="font-size:.8rem;color:var(--muted);margin-bottom:8px">📄 Documentos en la KB</h4>
-      <div id="doc-preview" class="doc-preview"></div>
-      <div id="doc-list" class="doc-list"></div>
+    <div id="ingest-result"></div>
+
+    <div id="admin-section" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+      <h4 style="font-size:.8rem;color:var(--warn);margin-bottom:8px">👑 Administrar usuarios</h4>
+      <div id="user-list" class="doc-list"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" id="admin-new-user" placeholder="Nuevo usuario" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--txt);font-size:.82rem;padding:8px 12px;outline:none">
+        <input type="password" id="admin-new-pass" placeholder="Contraseña" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--txt);font-size:.82rem;padding:8px 12px;outline:none">
+        <button id="admin-create-btn" onclick="adminCreateUser()" style="height:auto;padding:8px 14px;font-size:.78rem">Crear</button>
+      </div>
     </div>
 
-    <div id="ingest-result"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeIngestModal()">Cerrar</button>
       <button class="btn-upload" onclick="resetRag()">🗑️ Reset KB</button>
@@ -145,9 +183,7 @@
   </div>
 </div>
 
-<footer>
-  NeuralChat v3 · RAG con Ollama · ChromaDB · {{ model }}
-</footer>
+<footer>NeuralChat v3 · RAG con Ollama · ChromaDB</footer>
 
 <script src="{{ url_for('static', filename='chat.js') }}"></script>
 </body>

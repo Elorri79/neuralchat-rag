@@ -1,7 +1,6 @@
 'use strict';
 
-const MODEL = document.getElementById('chat-root')?.dataset.model || 'llama3.2:1b';
-const OLLAMA = document.getElementById('chat-root')?.dataset.ollama || 'http://127.0.0.1:11434';
+const MODEL = document.getElementById('chat-root')?.dataset.model || 'qwen3.5:4b';
 
 let conv = [];
 let tokenCount = 0;
@@ -12,7 +11,108 @@ let aiTokenLens = [];
 let ragDocs = [];
 let ragEnabled = true;
 let currentModel = MODEL;
+let currentUser = null;
+let currentSessionId = null;
+let sessions = [];
+let loadingHistory = false;
 
+// ── Auth ────────────────────────────────────────────────────────────────────
+
+function showAuth() {
+  document.getElementById('auth-error').style.display = 'none';
+  document.getElementById('auth-error').textContent = '';
+  document.getElementById('auth-username').value = '';
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-overlay').classList.add('open');
+}
+function hideAuth() {
+  document.getElementById('auth-overlay').classList.remove('open');
+}
+
+let authMode = 'login';
+const authTitle = document.getElementById('auth-title');
+const authSubmit = document.getElementById('auth-submit');
+const authToggle = document.getElementById('auth-toggle');
+const authError = document.getElementById('auth-error');
+const authUser = document.getElementById('auth-username');
+const authPass = document.getElementById('auth-password');
+
+authToggle.addEventListener('click', () => {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  authTitle.textContent = authMode === 'login' ? '🔐 Iniciar sesión' : '📝 Crear cuenta';
+  authSubmit.textContent = authMode === 'login' ? 'Entrar' : 'Crear cuenta';
+  authToggle.textContent = authMode === 'login' ? '¿No tienes cuenta? Registrarse' : '¿Ya tienes cuenta? Iniciar sesión';
+  authError.style.display = 'none';
+});
+
+authSubmit.addEventListener('click', async () => {
+  const username = authUser.value.trim();
+  const password = authPass.value.trim();
+  if (!username || !password) {
+    authError.textContent = 'Completa todos los campos';
+    authError.style.display = 'block';
+    return;
+  }
+  authError.style.display = 'none';
+  try {
+    const r = await fetch(`/auth/${authMode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const d = await r.json();
+    if (d.error) {
+      authError.textContent = d.error;
+      authError.style.display = 'block';
+      return;
+    }
+    currentUser = d.user;
+    hideAuth();
+    onLogin();
+  } catch(e) {
+    console.error('Auth fetch error:', e);
+    authError.textContent = 'Error al conectar con el servidor. ¿Está Flask corriendo?';
+    authError.style.display = 'block';
+  }
+});
+
+authUser.addEventListener('keydown', e => { if (e.key === 'Enter') authSubmit.click(); });
+authPass.addEventListener('keydown', e => { if (e.key === 'Enter') authSubmit.click(); });
+
+async function checkAuth() {
+  try {
+    const r = await fetch('/auth/me');
+    const d = await r.json();
+    if (d.authenticated && d.user) {
+      currentUser = d.user;
+      onLogin();
+    } else {
+      showAuth();
+    }
+  } catch(e) {
+    showAuth();
+  }
+}
+
+async function logout() {
+  await fetch('/auth/logout', { method: 'POST' });
+  currentUser = null;
+  currentSessionId = null;
+  sessions = [];
+  conv = [];
+  document.getElementById('chat').innerHTML = '';
+  document.getElementById('sessions-list').innerHTML = '';
+  document.getElementById('user-menu').style.display = 'none';
+  document.getElementById('user-dropdown').classList.remove('open');
+  document.getElementById('kpi-chunks').textContent = '—';
+  document.getElementById('kpi-storage').textContent = '—';
+  document.getElementById('session-title').textContent = '';
+  document.getElementById('docs-list').innerHTML = '<div class="panel-empty">Sin documentos todavía.<br>Haz clic en 📚 RAG para añadir.</div>';
+  document.getElementById('docs-preview').style.display = 'none';
+  showAuth();
+}
+
+// ── Model selector ────────────────────────────────────────────────────────────
 async function loadModels() {
   const sel = document.getElementById('model-select');
   if (!sel) return;
@@ -32,11 +132,134 @@ async function loadModels() {
       sel.innerHTML = '<option value="">Sin modelos</option>';
     }
   } catch(e) {
-    sel.innerHTML = '<option value="">Error cargando</option>';
+    sel.innerHTML = '<option value="">Modelos no disponibles</option>';
   }
 }
-loadModels();
 
+// ── Sessions ─────────────────────────────────────────────────────────────────
+
+function onLogin() {
+  const menu = document.getElementById('user-menu');
+  const badge = document.getElementById('user-badge');
+  const info = document.getElementById('dropdown-info');
+  menu.style.display = 'block';
+  badge.className = 'user-badge' + (currentUser.is_admin ? ' admin' : '');
+  badge.textContent = currentUser.is_admin ? '👑 ' + currentUser.username : '👤 ' + currentUser.username;
+  info.innerHTML = `<span class="uname">${currentUser.username}</span><span class="urole">${currentUser.is_admin ? 'Administrador' : 'Usuario'}</span>`;
+  loadModels();
+  loadSessions();
+  loadRagStats();
+  loadDocsPanel();
+}
+
+// User dropdown toggle
+document.addEventListener('DOMContentLoaded', () => {
+  const badge = document.getElementById('user-badge');
+  const dropdown = document.getElementById('user-dropdown');
+  if (badge) {
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle('open');
+    });
+    document.addEventListener('click', () => dropdown.classList.remove('open'));
+  }
+});
+
+async function loadSessions() {
+  try {
+    const r = await fetch('/sessions');
+    const d = await r.json();
+    sessions = d.sessions || [];
+    renderSessions();
+    if (sessions.length > 0 && !currentSessionId) {
+      switchSession(sessions[0].id);
+    } else if (sessions.length === 0) {
+      newSession();
+    }
+  } catch(e) {}
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessions-list');
+  list.innerHTML = sessions.map(s =>
+    `<div class="session-item ${s.id === currentSessionId ? 'active' : ''}"
+          onclick="switchSession(${s.id})">
+       <span class="session-title">${s.title}</span>
+       <button class="session-del" onclick="event.stopPropagation();deleteSession(${s.id})">×</button>
+     </div>`
+  ).join('');
+}
+
+async function newSession() {
+  try {
+    const r = await fetch('/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const d = await r.json();
+    sessions.unshift(d.session);
+    renderSessions();
+    switchSession(d.session.id);
+  } catch(e) {}
+}
+
+async function switchSession(sessionId) {
+  if (loadingHistory) return;
+  currentSessionId = sessionId;
+  renderSessions();
+  document.getElementById('session-title').textContent = '';
+  loadingHistory = true;
+  try {
+    const r = await fetch(`/sessions/${sessionId}/messages`);
+    const d = await r.json();
+    const msgs = d.messages || [];
+    const chatEl = document.getElementById('chat');
+    chatEl.innerHTML = '';
+    conv = [];
+    tokenCount = 0;
+    msgCount = 0;
+    respTimes = [];
+    userTokenLens = [];
+    aiTokenLens = [];
+
+    for (const m of msgs) {
+      if (m.role === 'user') {
+        addMessage('user', m.content);
+        conv.push({ role: 'user', content: m.content });
+        userTokenLens.push(m.content.split(/\s/).length);
+      } else if (m.role === 'assistant') {
+        addMessage('ai', m.content);
+        conv.push({ role: 'assistant', content: m.content });
+        const words = m.content.split(/\s/).length;
+        aiTokenLens.push(words);
+        tokenCount += m.content.length;
+        msgCount++;
+      }
+    }
+
+    const s = sessions.find(s => s.id === sessionId);
+    if (s) document.getElementById('session-title').textContent = s.title;
+
+    document.getElementById('kpi-tokens').textContent = tokenCount;
+    document.getElementById('kpi-msgs').textContent = msgCount;
+    document.getElementById('kpi-time').textContent = respTimes.length > 0 ? respTimes[respTimes.length-1] + 's' : '—';
+  } catch(e) {}
+  loadingHistory = false;
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm('¿Eliminar esta conversación?')) return;
+  try {
+    await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+    sessions = sessions.filter(s => s.id !== sessionId);
+    if (currentSessionId === sessionId) {
+      currentSessionId = null;
+      if (sessions.length > 0) switchSession(sessions[0].id);
+      else newSession();
+    } else {
+      renderSessions();
+    }
+  } catch(e) {}
+}
+
+// ── DOM ─────────────────────────────────────────────────────────────────────
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
 const sendBtn = document.getElementById('send');
@@ -62,47 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-const COLORS = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#c77dff','#ff9f43','#39c5bb','#f778ba'];
-Chart.defaults.color = '#8b949e';
-Chart.defaults.borderColor = 'rgba(48,54,61,.8)';
-
-function makeChart(id, labels, data, maxBars=8) {
-  return new Chart(document.getElementById(id), {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{ data, backgroundColor: COLORS.slice(0, data.length), borderWidth: 0, borderRadius: 4 }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      animation: { duration: 400 },
-      scales: {
-        x: { grid: { color: 'rgba(48,54,61,.6)' }, ticks: { color: '#8b949e', font: { size: 9 } } },
-        y: { grid: { color: 'rgba(48,54,61,.6)' }, ticks: { color: '#8b949e', font: { size: 9 } }, beginAtZero: true }
-      }
-    }
-  });
-}
-
-let chartTokens = makeChart('chartTokens', ['—'], [0]);
-let chartTime   = makeChart('chartTime', ['—'], [0]);
-
-let MAX_BARS = 8;
-
-function updateCharts() {
-  const tData   = userTokenLens.slice(-MAX_BARS);
-  const n       = tData.length;
-  chartTokens.data.labels = Array.from({length:n}, (_,i)=>'M'+(userTokenLens.length-n+i+1));
-  chartTokens.data.datasets[0].data = tData;
-  chartTokens.update('none');
-
-  chartTime.data.datasets[0].data = respTimes;
-  chartTime.data.labels = respTimes.map((_,i)=>'R'+(i+1));
-  chartTime.update('none');
-}
-
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function scrollBottom() {
   chat.scrollTop = chat.scrollHeight;
 }
@@ -178,6 +361,18 @@ async function retrieveRag(query) {
   }
 }
 
+async function saveMessage(role, content, tokens) {
+  if (!currentSessionId) return;
+  try {
+    await fetch('/chat/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: currentSessionId, role, content, tokens: tokens || 0 })
+    });
+  } catch(e) {}
+}
+
+// ── Send ─────────────────────────────────────────────────────────────────────
 async function sendMsg() {
   const text = input.value.trim();
   if (!text) return;
@@ -187,6 +382,7 @@ async function sendMsg() {
   addMessage('user', text);
   conv.push({ role: 'user', content: text });
   userTokenLens.push(text.split(/\s/).length);
+  saveMessage('user', text);
 
   ragDocs = [];
   if (ragEnabled) {
@@ -205,7 +401,7 @@ async function sendMsg() {
   const t0 = Date.now();
 
   try {
-    const body = { model: currentModel, messages: conv, rag: ragEnabled, rag_context: ragDocs };
+    const body = { model: currentModel, messages: conv, rag: ragEnabled, rag_context: ragDocs, session_id: currentSessionId };
 
     const res = await fetch('/chat/stream', {
       method: 'POST',
@@ -250,9 +446,10 @@ async function sendMsg() {
                 document.getElementById('kpi-msgs').textContent = msgCount;
                 document.getElementById('kpi-time').textContent = elapsed + 's';
 
-                updateCharts();
-
                 ragDot.classList.remove('active');
+
+                saveMessage('assistant', reply, reply.length);
+                loadSessions();
               }
             } catch(e) {}
           }
@@ -273,6 +470,7 @@ async function sendMsg() {
 }
 
 function clearChat() {
+  if (!confirm('¿Limpiar la conversación actual?')) return;
   chat.innerHTML = '';
   conv = [];
   tokenCount = 0;
@@ -285,27 +483,35 @@ function clearChat() {
   document.getElementById('kpi-msgs').textContent = '0';
   document.getElementById('kpi-time').textContent = '—';
   document.getElementById('kpi-chunks').textContent = '—';
-  chartTokens.data.datasets[0].data = [0];
-  chartTokens.data.labels = ['—'];
-  chartTokens.update('none');
-  chartTime.data.datasets[0].data = [];
-  chartTime.data.labels = ['—'];
-  chartTime.update('none');
   if (typeof loadRagStats === 'function') loadRagStats();
+}
+
+// ── Panel toggles ──────────────────────────────────────────────────────────────
+function togglePanel(name) {
+  const el = document.getElementById('panel-' + name);
+  const btn = document.getElementById('toggle-' + name);
+  if (!el) return;
+  const wasOpen = !el.classList.contains('closed');
+  el.classList.toggle('closed');
+  btn.classList.toggle('active');
+  btn.title = wasOpen
+    ? (name === 'sessions' ? 'Abrir conversaciones' : 'Abrir documentos')
+    : (name === 'sessions' ? 'Cerrar conversaciones' : 'Cerrar documentos');
+  btn.textContent = wasOpen
+    ? (name === 'sessions' ? '▶' : '◀')
+    : (name === 'sessions' ? '◀' : '▶');
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
 }
 
 // ── RAG stats ─────────────────────────────────────────────────────────────────
 async function loadRagStats() {
+  if (!currentUser) return;
   try {
     const r = await fetch('/rag/status');
     const d = await r.json();
     document.getElementById('kpi-chunks').textContent = d.chunks || 0;
-    document.getElementById('rag-panel').style.display = d.chunks > 0 ? 'block' : 'none';
-    const srcEl = document.getElementById('rag-sources');
-    if (d.sources && d.sources.length) {
-      srcEl.innerHTML = d.sources.map(s => `<span>${s}</span>`).join('');
-    } else {
-      srcEl.innerHTML = '<span style="color:var(--muted)">Sin documentos</span>';
+    if (d.storage) {
+      document.getElementById('kpi-storage').textContent = `${d.storage.used}/${d.storage.max}`;
     }
   } catch(e) {}
 }
@@ -340,26 +546,28 @@ async function ingestFiles(files) {
       resultEl.innerHTML = `<span style="color:var(--crit)">Error: ${d.error}</span>`;
     } else {
       const total = d.total_chunks || 0;
-      resultEl.innerHTML = `<span style="color:var(--ok)">✅ ${total} chunks ingestados de ${d.files.length} archivo(s)</span>`;
+      resultEl.innerHTML = `<span style="color:var(--ok)">✅ ${total} chunks de ${d.files.length} archivo(s)</span>`;
       resultEl.innerHTML += '<br>' + d.files.map(f =>
         `${f.file}: ${f.status === 'ok' ? f.chunks + ' chunks' : f.status}`
       ).join('<br>');
     }
     loadRagStats();
     loadDocList();
+    loadDocsPanel();
   } catch(e) {
     resultEl.innerHTML = `<span style="color:var(--crit)">Error: ${e.message}</span>`;
   }
 }
 
 async function resetRag() {
-  if (!confirm('¿Borrar toda la knowledge base?')) return;
+  if (!confirm('¿Borrar toda tu knowledge base?')) return;
   try {
     const r = await fetch('/rag/reset', { method: 'POST' });
     const d = await r.json();
     resultEl.innerHTML = `<span style="color:var(--ok)">${d.status}</span>`;
     loadRagStats();
     loadDocList();
+    loadDocsPanel();
   } catch(e) { resultEl.innerHTML = `<span style="color:var(--crit)">${e.message}</span>`; }
 }
 
@@ -544,6 +752,7 @@ async function ingestSelected() {
   renderBrowser();
   loadRagStats();
   loadDocList();
+  loadDocsPanel();
   btn.disabled = false;
 }
 
@@ -588,22 +797,136 @@ async function previewDoc(source) {
 }
 
 async function deleteDoc(source) {
-  if (!confirm(`¿Eliminar "${source}" de la knowledge base?`)) return;
+  if (!confirm(`¿Eliminar "${source}" de tu knowledge base?`)) return;
   try {
-    const r = await fetch('/rag/delete', {
+    await fetch('/rag/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source })
     });
-    const d = await r.json();
     loadRagStats();
     loadDocList();
+    loadDocsPanel();
     document.getElementById('doc-preview').style.display = 'none';
+  } catch(e) {}
+}
+
+// ── Documents panel (right) ────────────────────────────────────────────────────
+async function loadDocsPanel() {
+  const listEl = document.getElementById('docs-list');
+  if (!listEl) return;
+  try {
+    const r = await fetch('/rag/documents');
+    const d = await r.json();
+    const docs = d.documents || [];
+    if (docs.length === 0) {
+      listEl.innerHTML = '<div class="panel-empty">Sin documentos todavía.<br>Haz clic en 📚 Menú para añadir.</div>';
+      return;
+    }
+    listEl.innerHTML = docs.map(doc =>
+      `<div class="doc-item" onclick="previewDocPanel('${doc.source.replace(/'/g,"\\'")}')">
+        <span class="doc-icon">📄</span>
+        <span class="doc-name">${doc.source}</span>
+        <span class="doc-chunks">${doc.chunks}</span>
+        <button class="doc-del" onclick="event.stopPropagation();deleteDocPanel('${doc.source.replace(/'/g,"\\'")}')">×</button>
+      </div>`
+    ).join('');
+  } catch(e) { console.error('loadDocsPanel error:', e); }
+}
+
+async function previewDocPanel(source) {
+  const preview = document.getElementById('docs-preview');
+  if (!preview) return;
+  document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.doc-item').forEach(el => {
+    if (el.querySelector('.doc-name')?.textContent === source) el.classList.add('active');
+  });
+  try {
+    const r = await fetch('/rag/document-content?source=' + encodeURIComponent(source));
+    const d = await r.json();
+    if (d.content) {
+      preview.innerHTML = '<pre>' + d.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0, 3000) + (d.content.length > 3000 ? '\n\n… (truncado)' : '') + '</pre>';
+      preview.style.display = 'block';
+    } else {
+      preview.innerHTML = '<pre style="color:var(--muted)">(documento vacío)</pre>';
+      preview.style.display = 'block';
+    }
+  } catch(e) {
+    preview.innerHTML = '<pre style="color:var(--crit)">Error</pre>';
+    preview.style.display = 'block';
+  }
+}
+
+async function deleteDocPanel(source) {
+  if (!confirm(`¿Eliminar "${source}" de tu knowledge base?`)) return;
+  try {
+    await fetch('/rag/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source })
+    });
+    document.getElementById('docs-preview').style.display = 'none';
+    loadDocsPanel();
+    loadRagStats();
+    loadDocList();
   } catch(e) {}
 }
 
 // ── Modal open/close ───────────────────────────────────────────────────────────
 let modalOpened = false;
+async function loadAdminUsers() {
+  const section = document.getElementById('admin-section');
+  const listEl = document.getElementById('user-list');
+  if (!currentUser?.is_admin) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  try {
+    const r = await fetch('/auth/users');
+    const d = await r.json();
+    listEl.innerHTML = (d.users || []).map(u =>
+      `<div class="doc-row">
+        <span class="doc-name">${u.is_admin ? '👑 ' : '👤 '}${u.username}</span>
+        <span class="doc-chunks">${u.last_login ? new Date(u.last_login).toLocaleDateString() : 'nunca'}</span>
+        ${u.id !== currentUser.id
+          ? `<button class="doc-delete" onclick="adminDeleteUser(${u.id})">×</button>`
+          : '<span style="font-size:.65rem;color:var(--muted)">(tú)</span>'}
+      </div>`
+    ).join('');
+  } catch(e) {}
+}
+
+async function adminCreateUser() {
+  const username = document.getElementById('admin-new-user').value.trim();
+  const password = document.getElementById('admin-new-pass').value.trim();
+  if (!username || !password) return;
+  try {
+    const r = await fetch('/auth/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('ingest-result').innerHTML = `<span style="color:var(--crit)">${d.error}</span>`;
+    } else {
+      document.getElementById('admin-new-user').value = '';
+      document.getElementById('admin-new-pass').value = '';
+      document.getElementById('ingest-result').innerHTML = `<span style="color:var(--ok)">✅ Usuario "${username}" creado</span>`;
+      loadAdminUsers();
+    }
+  } catch(e) {}
+}
+
+async function adminDeleteUser(userId) {
+  if (!confirm('¿Eliminar este usuario y todas sus conversaciones?')) return;
+  try {
+    await fetch(`/auth/users/${userId}`, { method: 'DELETE' });
+    loadAdminUsers();
+  } catch(e) {}
+}
+
 function openIngestModal() {
   document.getElementById('ingest-modal').classList.add('open');
   if (!modalOpened) {
@@ -612,10 +935,11 @@ function openIngestModal() {
   }
   loadRagStats();
   loadDocList();
+  loadAdminUsers();
 }
 function closeIngestModal() {
   document.getElementById('ingest-modal').classList.remove('open');
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-loadRagStats();
+checkAuth();
